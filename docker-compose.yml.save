@@ -1,0 +1,103 @@
+version: '2'
+
+networks:
+  internal:
+    internal: true
+
+services:
+  fluentd:
+    container_name: unms-fluentd
+    image: rveillerot/unms-fluentd
+    restart: always
+    mem_limit: 50000000
+    networks:
+      - default
+    ports:
+      - 127.0.0.1:24224:24224
+    volumes:
+      - /mnt/nfs/rancher/unms/config/fluentd.conf:/etc/fluent/fluent.conf
+      - /mnt/nfs/rancher/unms/data/logs:/fluentd/log
+    environment:
+      - FLUENTD_UID=30000
+
+  redis:
+    container_name: unms-redis
+    image: redis:3.2.8-alpine
+    user: "30000"
+    restart: always
+    mem_limit: 200000000
+    depends_on:
+      - fluentd
+    networks:
+      - internal
+    volumes:
+      - /mnt/nfs/rancher/unms/data/redis:/data/db
+    logging:
+      driver: fluentd
+      options:
+        tag: "redis"
+        fluentd-async-connect: "true"
+    command: "redis-server --appendonly yes --dir /data/db/"
+
+  postgres:
+    container_name: unms-postgres
+    image: postgres:9.6.1-alpine
+    user: "30000"
+	group_add:
+	  - postgres
+    restart: always
+    mem_limit: 200000000
+    depends_on:
+      - fluentd
+    networks:
+      - internal
+    volumes:
+      - /mnt/nfs/rancher/unms/data/postgres:/var/lib/postgresql/data/pgdata
+    logging:
+      driver: fluentd
+      options:
+        tag: "postgres"
+        fluentd-async-connect: "true"
+    environment:
+      - POSTGRES_DB=unms
+      - PGDATA=/var/lib/postgresql/data/pgdata
+
+  unms:
+    container_name: unms
+    image: ubnt/unms:latest
+    restart: always
+    mem_limit: 500000000
+    depends_on:
+      - fluentd
+      - redis
+      - postgres
+    networks:
+      - internal
+      - default
+    volumes:
+      - /mnt/nfs/rancher/unms/data:/home/app/unms/data
+      - /mnt/nfs/rancher/unms/data/cert:/home/app/unms/cert
+    ports:
+      - 80:80
+      - 443:443
+      - 8444:8444
+    logging:
+      driver: fluentd
+      options:
+        tag: "unms"
+        fluentd-async-connect: "true"
+    environment:
+      - UNMS_USER_ID=30000
+      - PROD=true
+      - DEMO=false
+      - HTTP_PORT=80
+      - HTTPS_PORT=443
+      - PUBLIC_HTTPS_PORT=443
+      - PUBLIC_WS_PORT=8444
+      - WS_PORT=8444
+      - BEHIND_REVERSE_PROXY=false
+      - SSL_CERT=
+      - SSL_CERT_KEY=
+      - SSL_CERT_CA=
+      - HOST_TAG=
+      - BRANCH=master
